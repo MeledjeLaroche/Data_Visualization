@@ -1,0 +1,180 @@
+---
+title: "Analysis"
+output: html_document
+date: "2023-02-13"
+---
+# Packages 
+
+```{r}
+library(tidyverse)
+library(readxl)
+```
+
+# I. Construction de la base de données
+
+#### 1. Queles fonctions utiles
+Nous commençons par écrire une fonction permettant de chargé les données des compagnies de transport.
+
+```{r}
+# Extraction des données sur le transport
+extract_data = function(path,sheet_numb,cur_year){
+  
+  for (i in sheet_numb){
+    if (i == sheet_numb[1]){
+      data = tibble(read_excel(path, sheet = i,skip = 5) %>% select(-9))
+      year = tibble(ANNEE = rep(cur_year,dim(data)[1]))
+      data = bind_cols(data, year)
+    }
+    else{
+      new_rows = read_excel(path, sheet = i,skip = 5) %>% select(1:8)
+      year = tibble(ANNEE = rep(cur_year,dim(new_rows)[1]))
+      new_rows = bind_cols(new_rows, year)
+      colnames(new_rows) = c("Compagnie","Fmaritime","Aviation","Autres","Corps","Total Transp","Total Iard","Part Transports","ANNEE")
+      data = bind_rows(data,new_rows)
+    }
+    cur_year = cur_year - 1
+  }
+  data = data %>% filter(Compagnie != "TOTAL") %>% drop_na
+  
+  return (data)
+}
+```
+
+#### 2. Chargement des données
+
+```{r}
+# Le marché des assurances
+
+societe = read_excel("data/bd_marche_assurance.xlsx", sheet = 1)
+branche = read_excel("data/bd_marche_assurance.xlsx", sheet = 2)
+ca = read_excel("data/bd_marche_assurance.xlsx", sheet = 3)
+prestation = read_excel("data/bd_marche_assurance.xlsx", sheet = 4)
+event = read_excel("data/bd_marche_assurance.xlsx", sheet = 5)
+info_vie = read_excel("data/bd_marche_assurance.xlsx", sheet = 6)
+marche = societe %>% left_join(info_vie)
+ca_branche = ca %>%  left_join(branche) %>% full_join(prestation)
+marche_assurance = marche %>% inner_join(ca_branche) %>% left_join(event)
+
+# Le chiffres d'affaire du marhé de 1987-2010 par catégorie
+
+path = "data/ca_marche_1987_2010.xls"
+ca_marche = extract_data(path,5:22,2009) %>% filter(ANNEE!=2009)
+
+# Exportation des données dans des fichiers plats csv
+
+write.csv(ca_marche,"data/ca_quality.csv")
+
+```
+
+#### 3. Creation de nouvelles variables et modification de quelques variables
+
+Il s'agira principalement de créer la variable ```date de création``` de certaines compagnies non renseignées en raison du fait qu'elles aient été rachétées, changées de dénomination etc.  
+
+* Dates rétrouvées dans la table ```info_vie```
+
+```{r}
+# Compagnies se répetant deux fois
+
+ info_vie = info_vie %>% mutate(CREATION = case_when(ID_SOCIETE =="S1" & ANNE == 0 ~ 1995,
+                                                    ID_SOCIETE =="S1" & ANNE == 1995 ~ 2017,
+                                              ID_SOCIETE == "S11" & ANNE == 2003 ~ 2005,
+                                              ID_SOCIETE == "S7" & ANNE == 0 ~ 1976,
+                                              ID_SOCIETE == "S51" & ANNE == 0 ~ 2017,
+                                              ID_SOCIETE == "S5" & ANNE == 0 ~ 1987,
+                                              ID_SOCIETE == "S55" ~ 2013,
+                                              ID_SOCIETE == "S54" ~ 1987,
+                                              ID_SOCIETE=="S50" ~ 2004,
+                                              TRUE ~ ANNE) )
+
+# Compagnies apparaissant une seule fois
+
+info_vie = info_vie %>% mutate(CREATION = case_when(ID_SOCIETE =="S15" ~ 1863,
+                                                      ID_SOCIETE =="S28" ~ 1984,
+                                                      ID_SOCIETE =="S17" ~ 1965,
+                                                      ID_SOCIETE =="S25" ~ 1955,
+                                                      ID_SOCIETE =="S33" ~ 1987,
+                                                      ID_SOCIETE =="S4" ~ 1987,
+                                                      ID_SOCIETE =="S26" ~ 1963,
+                                                      ID_SOCIETE =="S29" ~ 1987,
+                                                      ID_SOCIETE =="S30" ~ 1987,
+                                                      ID_SOCIETE =="S34" ~ 1989,
+                                                      ID_SOCIETE =="S36" ~ 1987,
+                                                      ID_SOCIETE =="S2" ~ 1974,
+                                                      ID_SOCIETE =="S37" ~ 1987,
+                                                      ID_SOCIETE =="S39" ~ 1997,
+                                                      ID_SOCIETE =="S42" ~ 1987,
+                                                      ID_SOCIETE =="S58" ~ 1973,
+                                                      TRUE ~ CREATION) )
+
+# Compagnies sans informations
+
+aia = tibble(ID_IFO="inf64", ID_SOCIETE="S6", FUSION="non",FAILLITE="non",CREATION=2006)
+atlantique_vie = tibble(ID_IFO="inf65", ID_SOCIETE="S12", FUSION="oui",FAILLITE="non",CREATION=2014)
+stamvie = tibble(ID_IFO="inf66", ID_SOCIETE="S12", FUSION="non",FAILLITE="oui",CREATION=1970)
+AMCI_STAMVIE = tibble(ID_IFO="inf67", ID_SOCIETE="S12", FUSION="non",FAILLITE="oui",CREATION=2006)
+cea = tibble(ID_IFO="inf68", ID_SOCIETE="S16", FUSION="non",FAILLITE="oui",CREATION=1987)
+new_rows = aia %>% bind_rows(stamvie) %>% bind_rows(AMCI_STAMVIE) %>% bind_rows(atlantique_vie) %>% bind_rows(cea)
+
+info_vie = info_vie %>% select(-ANNE) %>% bind_rows(new_rows)
+view(info_vie)
+# RECHERHER SUR LES DONNEES
+#ca %>% filter(ID_SOCIETE =="S16") %>% select(ANNEE) %>% distinct() %>% arrange(ANNEE)
+#ca_marche %>% filter(Compagnie=="CEA") %>% select(ANNEE) %>% distinct() %>% arrange(ANNEE)
+#ca_marche %>% select(Compagnie) %>% distinct
+```
+
+
+* Recodage des noms de sociétés ayant subit des changements
+
+```{r}
+info_societe = societe %>% inner_join(info_vie) %>% 
+            mutate(NOM_SOCIETE = case_when(
+              ID_SOCIETE == "S1" & CREATION == 1995 ~ "SAFA (SOLIDARITE AFRICAINE D'ASSURANCE)",
+              ID_SOCIETE == "S1" & CREATION == 2017 ~ "2ACI, ex SAFA",
+              ID_SOCIETE == "S11" & CREATION == 1956 ~ "MACI(MUTUELLE AGRICOLE de CI)",
+              ID_SOCIETE == "S11" & CREATION == 2005 ~ "ATLANTIQUE, ex MACI",
+              ID_SOCIETE == "S7" & CREATION == 1976 ~ "AGF SAFFARIV VIE",
+              ID_SOCIETE == "S7" & CREATION == 2009 ~ "ALLIANZ VIE, ex AGF SAFFARIV VIE",
+              ID_SOCIETE == "S12" & CREATION == 2014 ~ "ATLANTIQUE VIE, ex AMC STAMVIE",
+              ID_SOCIETE == "S12" & CREATION == 2006 ~ "AMC STAMVIE, ex STAMVIE ",
+              ID_SOCIETE == "S12" & CREATION == 1970 ~ "STAMVIE ",
+              ID_SOCIETE == "S55"  ~ "TSA (TROPICAL SOCIETE D'ASSURANCE), ex SONAR-CI",
+              TRUE ~ NOM_SOCIETE )) %>% select(-ID_IFO) %>% distinct
+
+write.csv(info_societe,"info_societe.csv")
+```
+
+
+
+```{r}
+info_societe = read.csv("info_societe.csv")
+test = info_societe %>% inner_join(ca)
+info_societe %>% group_by(ID_SOCIETE) %>% count %>% filter(n>1) %>% inner_join(info_societe) %>% select(ID_SOCIETE,CREATION)
+
+```
+
+
+```{r}
+df_change = function(df, id, start_year, end_year){
+  df = df %>% filter(ID_SOCIETE==id) %>% filter((CREATION==start_year & ANNEE<end_year)|(CREATION==end_year & ANNEE>=end_year))
+  return (df)
+}
+```
+
+
+```{r}
+df_s12 = test %>% filter(ID_SOCIETE=="S12") %>% filter((CREATION==1970 & ANNEE<2006)|(CREATION==2006 & ANNEE<2014 &
+                                              ANNEE>=2006) | (CREATION==2014 & ANNEE>=2014))
+df = df_change(test,"S1",1995,2017) %>% bind_rows(df_change(test,"S11",1956,2005)) %>% 
+                            bind_rows(df_change(test,"S7",1976,2009)) %>% 
+                            bind_rows(df_change(test,"S7",1956,2005)) %>% 
+                            bind_rows(df_s12) %>%
+                            bind_rows(test %>% filter(!(ID_SOCIETE %in% c("S1","S7","S11","S12") ) ))
+df = df %>% inner_join(branche)
+df_tmp = df %>% left_join(prestation) %>% select(-ID_PREST)
+bd_marche = df_tmp %>% mutate(PRESTATION = if_else(is.na(PRESTATION)==T,0,as.numeric(PRESTATION)))
+bd_marche_event = bd_marche %>% inner_join(event)
+write.csv(bd_marche,"data/bd_marche_final.csv")
+write.csv(bd_marche_event,"data/bd_marche_event.csv")
+```
+
